@@ -16,7 +16,6 @@ package ocgrpc
 
 import (
 	"encoding/hex"
-	"fmt"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -78,9 +77,9 @@ func (s *ServerHandler) traceTagRPC(ctx context.Context, rti *stats.RPCTagInfo) 
 		}
 	}
 
+	// Propagate Jaeger incoming traces
 	jaegerContext := md[jaegerContextKey]
-	if len(jaegerContext) > 0 {
-		fmt.Println("found jaeger context")
+	if !haveParent && len(jaegerContext) > 0 {
 		parts := strings.Split(jaegerContext[0], ":")
 		if len(parts) == 4 {
 			if len(parts[2]) > 0 {
@@ -90,11 +89,9 @@ func (s *ServerHandler) traceTagRPC(ctx context.Context, rti *stats.RPCTagInfo) 
 			b, _ := hex.DecodeString(parts[0])
 			start := 8 + (8 - len(b))
 			copy(parent.TraceID[start:], b)
-			fmt.Println("found jaeger context", b, len(b), string(b), parent.TraceID)
 			b, _ = hex.DecodeString(parts[1])
 			start = 8 - len(b)
 			copy(parent.SpanID[start:], b)
-			fmt.Println("found jaeger context", b, len(b), string(b))
 			if parts[3] == "1" {
 				parent.TraceOptions = trace.TraceOptions(1)
 			} else {
