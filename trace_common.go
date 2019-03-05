@@ -16,13 +16,13 @@ package ocgrpc
 
 import (
 	"encoding/hex"
+	"fmt"
 	"strings"
-
-	"google.golang.org/grpc/codes"
 
 	"go.opencensus.io/trace"
 	"go.opencensus.io/trace/propagation"
 	"golang.org/x/net/context"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
@@ -78,32 +78,16 @@ func (s *ServerHandler) traceTagRPC(ctx context.Context, rti *stats.RPCTagInfo) 
 	}
 
 	// Propagate Jaeger incoming traces
-	jaegerContext := md[jaegerContextKey]
-	if !haveParent && len(jaegerContext) > 0 {
-		parts := strings.Split(jaegerContext[0], ":")
-		if len(parts) == 4 {
-			if len(parts[2]) > 0 {
-				haveParent = true
+	if jaegerContext, ok := md[jaegerContextKey]; ok {
+		if !haveParent && len(jaegerContext) > 0 {
+			parent, haveParent = spanContextFromJaeger(jaegerContext[0])
+			if haveParent && !s.IsPublicEndpoint {
+				ctx, _ := trace.StartSpanWithRemoteParent(ctx, name, parent,
+					trace.WithSpanKind(trace.SpanKindServer),
+					trace.WithSampler(s.StartOptions.Sampler),
+				)
+				return ctx
 			}
-
-			b, _ := hex.DecodeString(parts[0])
-			start := 8 + (8 - len(b))
-			copy(parent.TraceID[start:], b)
-			b, _ = hex.DecodeString(parts[1])
-			start = 8 - len(b)
-			copy(parent.SpanID[start:], b)
-			if parts[3] == "1" {
-				parent.TraceOptions = trace.TraceOptions(1)
-			} else {
-				parent.TraceOptions = trace.TraceOptions(0)
-			}
-		}
-		if haveParent && !s.IsPublicEndpoint {
-			ctx, _ := trace.StartSpanWithRemoteParent(ctx, name, parent,
-				trace.WithSpanKind(trace.SpanKindServer),
-				trace.WithSampler(s.StartOptions.Sampler),
-			)
-			return ctx
 		}
 	}
 
@@ -114,6 +98,45 @@ func (s *ServerHandler) traceTagRPC(ctx context.Context, rti *stats.RPCTagInfo) 
 		span.AddLink(trace.Link{TraceID: parent.TraceID, SpanID: parent.SpanID, Type: trace.LinkTypeChild})
 	}
 	return ctx
+}
+
+func spanContextFromJaeger(jv string) (parent trace.SpanContext, ok bool) {
+	parts := strings.Split(jv, ":")
+	if len(parts) == 4 {
+		b, err := hexDecodePadded(parts[0])
+		if err != nil {
+			return parent, false
+		}
+		if len(b) <= 8 {
+			// The lower 64-bits.
+			start := 8 + (8 - len(b))
+			copy(parent.TraceID[start:], b)
+		} else {
+			start := 16 - len(b)
+			copy(parent.TraceID[start:], b)
+		}
+
+		b, err = hexDecodePadded(parts[1])
+		if err != nil {
+			return parent, false
+		}
+		start := 8 - len(b)
+		copy(parent.SpanID[start:], b)
+		if parts[3] == "1" {
+			parent.TraceOptions = trace.TraceOptions(1)
+		} else {
+			parent.TraceOptions = trace.TraceOptions(0)
+		}
+	}
+
+	return parent, true
+}
+
+func hexDecodePadded(h string) ([]byte, error) {
+	if len(h)%2 != 0 {
+		h = fmt.Sprintf("0%s", h)
+	}
+	return hex.DecodeString(h)
 }
 
 func traceHandleRPC(ctx context.Context, rs stats.RPCStats) {
