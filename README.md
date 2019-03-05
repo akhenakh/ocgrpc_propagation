@@ -11,6 +11,8 @@ gsrv := grpc.NewServer(
   grpc.StatsHandler(&ocgrpc_propag.ServerHandler{}),
 )
 ```
+## Relevant code parts
+[trace_common.go](/trace_common.go#L81:L140)
 
 ## Known issues
 Due to conflit in registering views, you can't import `zpages` anymore.
