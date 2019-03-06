@@ -15,7 +15,8 @@ gsrv := grpc.NewServer(
 ## Client Propagation
 ```Go
 gsrv := grpc.NewServer(
-  grpc.UnaryInterceptor(ocgrpc_propag.JaegerTracePropagateUnaryInterceptor),
+  grpc.UnaryInterceptor(ocgrpc_propag.JaegerTracePropagateUnaryInterceptor()),
+  grpc.StreamInterceptor(ocgrpc_propag.JaegerTracePropagateStreamInterceptor()),
 )
 ```
 

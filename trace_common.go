@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"go.opencensus.io/trace"
 	"go.opencensus.io/trace/propagation"
 	"golang.org/x/net/context"
@@ -102,13 +103,30 @@ func (s *ServerHandler) traceTagRPC(ctx context.Context, rti *stats.RPCTagInfo) 
 }
 
 // JaegerTracePropagateUnaryInterceptor propagates incoming Jaeger trace to gRPC client
-func JaegerTracePropagateUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		if trace, ok := md[jaegerContextKey]; ok && len(trace) > 0 {
-			ctx = metadata.AppendToOutgoingContext(ctx, jaegerContextKey, trace[0])
+func JaegerTracePropagateUnaryInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		if md, ok := metadata.FromIncomingContext(ctx); ok {
+			if trace, ok := md[jaegerContextKey]; ok && len(trace) > 0 {
+				ctx = metadata.AppendToOutgoingContext(ctx, jaegerContextKey, trace[0])
+			}
 		}
+		return handler(ctx, req)
 	}
-	return handler(ctx, req)
+}
+
+// JaegerTracePropagateStreamInterceptor propagates incoming Jaeger trace to gRPC client
+func JaegerTracePropagateStreamInterceptor() grpc.StreamServerInterceptor {
+	return func(srv interface{}, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		var newCtx = stream.Context()
+		if md, ok := metadata.FromIncomingContext(stream.Context()); ok {
+			if trace, ok := md[jaegerContextKey]; ok && len(trace) > 0 {
+				newCtx = metadata.AppendToOutgoingContext(newCtx, jaegerContextKey, trace[0])
+			}
+		}
+		wrapped := grpc_middleware.WrapServerStream(stream)
+		wrapped.WrappedContext = newCtx
+		return handler(srv, wrapped)
+	}
 }
 
 func spanContextFromJaeger(jv string) (parent trace.SpanContext, ok bool) {
