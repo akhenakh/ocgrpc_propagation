@@ -22,6 +22,7 @@ import (
 	"go.opencensus.io/trace"
 	"go.opencensus.io/trace/propagation"
 	"golang.org/x/net/context"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
@@ -98,6 +99,16 @@ func (s *ServerHandler) traceTagRPC(ctx context.Context, rti *stats.RPCTagInfo) 
 		span.AddLink(trace.Link{TraceID: parent.TraceID, SpanID: parent.SpanID, Type: trace.LinkTypeChild})
 	}
 	return ctx
+}
+
+// JaegerTracePropagateUnaryInterceptor propagates incoming Jaeger trace to gRPC client
+func JaegerTracePropagateUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if trace, ok := md[jaegerContextKey]; ok && len(trace) > 0 {
+			ctx = metadata.AppendToOutgoingContext(ctx, jaegerContextKey, trace[0])
+		}
+	}
+	return handler(ctx, req)
 }
 
 func spanContextFromJaeger(jv string) (parent trace.SpanContext, ok bool) {
